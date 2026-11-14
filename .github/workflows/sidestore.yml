@@ -1,0 +1,41 @@
+name: Package SideStore variant
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and remove app extensions
+        run: |
+          curl -fL --retry 2 https://github.com/Danzxz/SCInsta/releases/download/scinsta-1.1.1-instagram-418.2.0/SCInsta_sideloaded_v1.1.1.ipa -o original.ipa
+          python3 - <<'PY'
+          import zipfile, plistlib
+          with zipfile.ZipFile('original.ipa') as src:
+              assert src.testzip() is None
+              extensions = [n for n in src.namelist() if n.endswith('.appex/Info.plist')]
+              assert extensions, 'Expected original extensions'
+              for n in extensions:
+                  print('Removing:', plistlib.loads(src.read(n)).get('CFBundleIdentifier'))
+              with zipfile.ZipFile('SCInsta-SideStore.ipa', 'w', zipfile.ZIP_DEFLATED) as dst:
+                  for item in src.infolist():
+                      if '/PlugIns/' in item.filename or '/Extensions/' in item.filename or '.appex/' in item.filename:
+                          continue
+                      dst.writestr(item, src.read(item.filename))
+          with zipfile.ZipFile('SCInsta-SideStore.ipa') as result:
+              assert result.testzip() is None
+              assert not any('.appex/' in n for n in result.namelist())
+              main = next(n for n in result.namelist() if n.startswith('Payload/') and n.count('/') == 2 and n.endswith('/Info.plist'))
+              info = plistlib.loads(result.read(main))
+              assert info['CFBundleIdentifier'] == 'com.burbn.instagram'
+              assert any(n.endswith('/SCInsta.dylib') for n in result.namelist())
+              print('Verified:', info['CFBundleShortVersionString'], 'no app extensions, SCInsta present')
+          PY
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: scinsta-1.1.1-sidestore
+          name: SCInsta 1.1.1 · SideStore fix
+          prerelease: true
+          body: Removes bundled app extensions to avoid the SideStore bundle identifier mismatch during installation. Main Instagram and SCInsta code unchanged. Device installation still requires verification.
+          files: SCInsta-SideStore.ipa
